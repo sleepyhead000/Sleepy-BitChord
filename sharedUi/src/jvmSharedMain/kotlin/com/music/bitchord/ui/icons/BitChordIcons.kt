@@ -152,10 +152,12 @@ object BitChordIcons {
     }
 
     /**
-     * The phone tab bar's Explore, Library and Search glyphs: solid-weight
+     * The phone tab bar's Explore, Library, Search and Account glyphs: solid-weight
      * iOS shapes rather than this file's stroked family, taken from the
      * outlines of Flutter's cupertino_icons font (MIT) — square_grid_2x2,
-     * square_stack_fill and search.
+     * square_stack_fill and search. Account is a person drawn in the same
+     * solid-weight idiom; the signed-in tab shows the listener's avatar
+     * photo instead, and this is the fallback it stands in for.
      *
      * Each is the glyph laid out the way the font sets it: the 512-unit em
      * box is the viewport, the baseline sits at the font's ascent share of
@@ -194,6 +196,21 @@ object BitChordIcons {
             "bc_tab_search",
             "M219 374.24Q151 374.24 102.5 325.74Q54 277.24 54 209.24Q54 141.24 102.5 92.74Q151 44.24 219 44.24Q287 44.24 335.5 92.74Q384 141.24 384 209.24Q384 264.24 350 309.24L451 410.24Q458 417.24 458 427.24Q458 438.24 451 445.24Q444 452.24 434 452.24Q423 452.24 416 445.24L315 343.24Q271 374.24 219 374.24Z" +
                 "M128 300.24Q166 338.24 219 338.24Q272 338.24 310 300.24Q348 262.24 348 209.24Q348 156.24 310 118.24Q272 80.24 219 80.24Q166 80.24 128 118.24Q90 156.24 90 209.24Q90 262.24 128 300.24Z",
+        )
+    }
+
+    /**
+     * A filled person in the 512-unit em box: a head disc over the shoulders'
+     * arch, both edges of the body curving into the flat hem at the baseline —
+     * the same solid-weight silhouette the other tab glyphs use. Shown only
+     * when the listener is signed out or the avatar has not loaded; signed in,
+     * the tab shows the listener's own photo in its place.
+     */
+    val TabAccount: ImageVector by lazy {
+        fontGlyph(
+            "bc_tab_account",
+            "M256 55Q351 55 351 150Q351 245 256 245Q161 245 161 150Q161 55 256 55Z" +
+                "M256 282Q145 282 84 362Q55 400 55 452H457Q457 400 428 362Q367 282 256 282Z",
         )
     }
 

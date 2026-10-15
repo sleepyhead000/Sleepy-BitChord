@@ -109,10 +109,14 @@ private val PreviewSong = Song(
 )
 
 private val PreviewTabs = listOf(
-    BottomTab("Play", BitChordIcons.Play),
+    BottomTab("Home", BitChordIcons.Home),
     BottomTab("Explore", BitChordIcons.TabExplore),
-    BottomTab("Library", BitChordIcons.TabLibrary),
     BottomTab("Search", BitChordIcons.TabSearch),
+    BottomTab("Library", BitChordIcons.TabLibrary),
+    // Null avatar: coil cannot reach the network from the preview renderer,
+    // so this shows the fallback glyph — exactly what a signed-out listener
+    // sees on the device.
+    BottomTab("Account", BitChordIcons.TabAccount),
 )
 
 /**

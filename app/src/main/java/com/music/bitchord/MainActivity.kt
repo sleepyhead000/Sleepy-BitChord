@@ -57,6 +57,8 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.LocalOverscrollFactory
@@ -95,6 +97,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -151,6 +154,7 @@ import com.music.bitchord.data.settings.ThemeMode
 import com.music.bitchord.ui.components.AccountProfileSelector
 import com.music.bitchord.ui.components.SpotifyImportAlert
 import com.music.bitchord.ui.screens.AccountAndScrobblingScreen
+import com.music.bitchord.ui.screens.AccountScreen
 import com.music.bitchord.ui.screens.DiscordDialog
 import com.music.bitchord.ui.screens.DiscordDialogHost
 import com.music.bitchord.ui.screens.DiscordScreen
@@ -243,7 +247,6 @@ import com.music.bitchord.ui.components.ListenBrainzTokenAlert
 import com.music.bitchord.ui.components.MiniPlayer
 import com.music.bitchord.ui.components.QueueActionNotice
 import com.music.bitchord.ui.components.QueueActionNoticeHost
-import com.music.bitchord.ui.components.TopBarAccountButton
 import com.music.bitchord.ui.screens.SegmentedControl
 import com.music.bitchord.ui.components.SearchField
 import com.music.bitchord.sharedui.resources.Res as SharedRes
@@ -476,6 +479,14 @@ private fun BitChordApp(
     // and the page is a sibling of the bar rather than a child.
     val navBarScroll = rememberFloatingTabBarScrollConnection()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    /**
+     * The root pages, side by side: a swipe moves between them exactly as a
+     * tap on the bar does. Both drive this one [selectedTab] — the bar
+     * through [selectTab], the pager through the sync effects above the
+     * content switcher — so there is never a page on screen that disagrees
+     * with the bar.
+     */
+    val pagerState = rememberPagerState(initialPage = selectedTab) { TAB_COUNT }
     /**
      * Whether the player's sheet is up. The player is always a full-screen
      * take-over raised over the page, on every window size — the library
@@ -987,6 +998,7 @@ private fun BitChordApp(
     val exploreListState = rememberLazyListState()
     val moodGenreListState = rememberLazyListState()
     val libraryListState = rememberLazyListState()
+    val accountListState = rememberLazyListState()
     val historyListState = rememberLazyListState()
     val libraryShowAllGridState = rememberLazyGridState()
     val searchListState = rememberLazyListState()
@@ -994,6 +1006,7 @@ private fun BitChordApp(
         TAB_HOME -> homeListState
         TAB_EXPLORE -> if (selectedMoodGenre == null) exploreListState else moodGenreListState
         TAB_LIBRARY -> libraryListState
+        TAB_ACCOUNT -> accountListState
         else -> searchListState
     }
 
@@ -1017,6 +1030,13 @@ private fun BitChordApp(
         // Likewise for Library: a playlist created or a song liked since it
         // was last fetched is a change to exactly this page.
         if (currentFeed == MainViewModel.Feed.LIBRARY) viewModel.onLibraryShown()
+    }
+    // The Account tab reads the channel list for "Listen as" and hands the
+    // same list to the switcher. Fetching on first landing keeps the name
+    // from sitting blank until the switcher is opened; [loadChannels] is a
+    // no-op once the list is held, so returning to the tab is free.
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == TAB_ACCOUNT) viewModel.loadChannels()
     }
 
     val currentPull = when (currentFeed) {
@@ -1083,16 +1103,25 @@ private fun BitChordApp(
     val exploreLabel = stringResource(R.string.explore)
     val libraryLabel = stringResource(R.string.library)
     val searchLabel = stringResource(R.string.search)
+    val accountLabel = stringResource(R.string.account)
     val historyLabel = stringResource(R.string.history)
     val replayLabel = stringResource(R.string.replay)
     val queueLabel = stringResource(R.string.queue)
     val sharedLinkLabel = stringResource(R.string.shared_link)
-    val tabs = remember(homeLabel, exploreLabel, libraryLabel, searchLabel) {
+    val tabs = remember(
+        homeLabel,
+        exploreLabel,
+        libraryLabel,
+        searchLabel,
+        accountLabel,
+        account?.thumbnailUrl,
+    ) {
         listOf(
             BottomTab(homeLabel, BitChordIcons.Home),
             BottomTab(exploreLabel, BitChordIcons.TabExplore),
-            BottomTab(libraryLabel, BitChordIcons.TabLibrary),
             BottomTab(searchLabel, BitChordIcons.TabSearch),
+            BottomTab(libraryLabel, BitChordIcons.TabLibrary),
+            BottomTab(accountLabel, BitChordIcons.TabAccount, avatarUrl = account?.thumbnailUrl),
         )
     }
 
@@ -2507,6 +2536,52 @@ private fun BitChordApp(
         BackHandler(enabled = libraryShowAll != null && detail == null) { libraryShowAll = null }
         BackHandler(enabled = detailActiveShelf != null) { detailActiveShelf = null }
 
+        /**
+         * Moves to a tab the way either bar does it: every overlay is closed
+         * first, so the landing page is the whole of what is on screen, and a
+         * tap of Search also clears the previous query and asks the field for
+         * focus. A swipe onto Search — see the pager below — just lands there:
+         * the listener swiped through it on the way and did not ask for a
+         * fresh search, so the query and the keyboard both stay as they were.
+         */
+        fun selectTab(index: Int, focusSearch: Boolean) {
+            viewModel.clearDetail()
+            viewModel.closeMoodGenre()
+            showSettings = false
+            showAccountScrobbling = false
+            showSources = false
+            showListenTogether = false
+            showEqualizer = false
+            showReplay = false
+            settingsSubScreen = null
+            showHistory = false
+            libraryShowAll = null
+            selectedTab = index
+
+            if (focusSearch && index == TAB_SEARCH) {
+                viewModel.onQueryChange("")
+                searchFocusRequested = true
+            }
+        }
+
+        // The pager and selectedTab each drive the other. A swipe that
+        // settles on a new page lands the selection here — without the
+        // Search tap's clear-and-refocus, which [selectTab] gates on
+        // [focusSearch] for exactly this caller — and a tap on the bar, a
+        // back to Home or the post-sign-in jump to Library animate the pager
+        // over in the effect below.
+        LaunchedEffect(pagerState) {
+            snapshotFlow { pagerState.settledPage }.collect { page ->
+                if (page != selectedTab) selectTab(page, focusSearch = false)
+            }
+        }
+        LaunchedEffect(selectedTab) {
+            // Settled already under a swipe, so this is a no-op there; the
+            // coerce is for a restored index from an older tab count.
+            val target = selectedTab.coerceIn(0, TAB_COUNT - 1)
+            if (pagerState.settledPage != target) pagerState.animateScrollToPage(target)
+        }
+
         // On a tablet the page and the player stand side by side rather than
         // one over the other: everything a phone stacks in a single column —
         // the feed, the frosted bars, the tab row — becomes the left half of
@@ -2541,33 +2616,30 @@ private fun BitChordApp(
                         showSettings -> "settings"
                         showReplay -> "replay"
                         detail != null -> detail.browseId
-                        else -> "$TAB_KEY$selectedTab"
+                        // One slot for all five root tabs: which of them is up
+                        // is the pager's own state, so the switcher's key
+                        // stays put while a swipe or a tap moves between the
+                        // pages inside it.
+                        else -> TABS_KEY
                     },
-                    // Tabs swap outright; everything else crossfades.
+                    // Pushed pages and overlays crossfade; the two pairs that
+                    // are really the same surface in two layouts swap
+                    // outright.
                     //
-                    // A tab is not a place you travel to — the bar is the whole
-                    // navigation and it carries its own movement — so a fade
-                    // between two of them only ever reads as a stutter. And it
-                    // cannot read as anything else: neither page paints a
-                    // background, so a crossfade dissolves both through to the
-                    // window and the switch dips through a dimmer frame in the
-                    // middle. Pushing a page or raising Settings is a real
-                    // change of context and keeps the fade.
-                    //
-                    // "Show all" swapping with the Library tab underneath it is
-                    // the same case as a tab swap, not a pushed page: it's still
-                    // that tab, just laid out as a grid instead of a row, sharing
-                    // its background rather than painting its own — so this one
-                    // pair gets the tab's no-fade swap too, in both directions, or
-                    // the dip through a dim frame shows up on every hold of a
-                    // card there. A card opened *from* the grid is a real page
-                    // and keeps the fade, same as one opened from the row.
+                    // "Show all" is Library laid out as a grid instead of a
+                    // row, sharing its background rather than painting its
+                    // own — so this one pair swaps in both directions, or the
+                    // dip through a dim frame shows up on every hold of a
+                    // card there. A card opened *from* the grid is a real
+                    // page and keeps the fade, same as one opened from the
+                    // row. Tab-to-tab movement no longer comes through here
+                    // at all: the pager slides between the pages inside the
+                    // single "tabs" slot, each of which paints the window the
+                    // same way, so the slide never dips through anything.
                     transitionSpec = {
-                        val tabSwap = initialState.startsWith(TAB_KEY) && targetState.startsWith(TAB_KEY)
-                        val libraryTabKey = "$TAB_KEY$TAB_LIBRARY"
-                        val libraryShowAllSwap = (initialState == "library_show_all" && targetState == libraryTabKey) ||
-                            (targetState == "library_show_all" && initialState == libraryTabKey)
-                        if (tabSwap || libraryShowAllSwap) {
+                        val libraryShowAllSwap = (initialState == "library_show_all" && targetState == TABS_KEY) ||
+                            (targetState == "library_show_all" && initialState == TABS_KEY)
+                        if (libraryShowAllSwap) {
                             EnterTransition.None togetherWith ExitTransition.None
                         } else {
                             fadeIn(tween(180)) togetherWith fadeOut(tween(180))
@@ -2980,7 +3052,18 @@ private fun BitChordApp(
                             songSort = songSort,
                             contentPadding = listPadding,
                         )
-                    } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {
+                    } else HorizontalPager(
+                        state = pagerState,
+                        // The mood/genre sub-page is a push within Explore —
+                        // back closes it, and a horizontal swipe from it
+                        // would leave the tab while still holding that page
+                        // as its return destination. Off that sub-page the
+                        // swipe is always live: it is the same gesture the
+                        // bars' taps perform, one page at a time.
+                        userScrollEnabled = selectedMoodGenre == null,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { pageIndex ->
+                        when (pageIndex) {
                         TAB_HOME -> HomeScreen(
                             state = homeState,
                             listState = homeListState,
@@ -3217,7 +3300,7 @@ private fun BitChordApp(
                                 )
                             },
                         )
-                        else -> LibraryScreen(
+                        TAB_LIBRARY -> LibraryScreen(
                             signedIn = signedIn,
                             state = libraryState,
                             listState = libraryListState,
@@ -3251,6 +3334,22 @@ private fun BitChordApp(
                             links = libraryLinks(),
                             deviceItems = libraryDeviceItems(downloadedReleases) + localPlaylistItems,
                         )
+                        TAB_ACCOUNT -> AccountScreen(
+                            signedIn = signedIn,
+                            account = account,
+                            channelName = selectedChannelName,
+                            onSignIn = { webSession = WebSessionMode.SIGN_IN },
+                            onSwitchChannel = {
+                                viewModel.loadChannels()
+                                showAccountSelector = true
+                            },
+                            onSignOut = { viewModel.signOut() },
+                            onOpenSettings = { showSettings = true },
+                            onOpenAccountScrobbling = { showAccountScrobbling = true },
+                            listState = accountListState,
+                            contentPadding = listPadding,
+                        )
+                        }
                     }
                 }
 
@@ -3690,21 +3789,13 @@ private fun BitChordApp(
                                     )
                                 }
                             }
-                            // Left of the account photo, and only there while
+                            // Left of the trailing edge, and only there while
                             // there is a batch to report on — see
                             // [TopBarDownloadButton], which decides that for
-                            // itself rather than being told.
+                            // itself rather than being told. The account photo
+                            // that used to sit beside it now lives on the
+                            // Account tab at the far right of the bottom bar.
                             TopBarDownloadButton(onClick = { showDownloadManager = true })
-                            TopBarAccountButton(
-                                account = account,
-                                onClick = {
-                                    if (signedIn) {
-                                        viewModel.loadChannels()
-                                        showAccountSelector = true
-                                    } else showSettings = true
-                                },
-                                onSwipeProfile = { forward -> viewModel.stepProfile(forward) },
-                            )
                         }
                     },
                 )
@@ -3727,28 +3818,10 @@ private fun BitChordApp(
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
 
-                // One tab handler, whichever bar is drawing it.
-                val onTabSelected: (Int) -> Unit = { index ->
-                    viewModel.clearDetail()
-                    viewModel.closeMoodGenre()
-                    showSettings = false
-                    showAccountScrobbling = false
-                    showSources = false
-                    showListenTogether = false
-                    showEqualizer = false
-                    showReplay = false
-                    settingsSubScreen = null
-                    showHistory = false
-                    libraryShowAll = null
-                    selectedTab = index
-
-                    // Every search tab tap resets the field, focuses it, and opens
-                    // the keyboard through SearchScreen's focus request.
-                    if (index == TAB_SEARCH) {
-                        viewModel.onQueryChange("")
-                        searchFocusRequested = true
-                    }
-                }
+                // One tab handler, whichever bar is drawing it. A tap takes the
+                // whole gesture — overlays closed, Search cleared and focused —
+                // via [selectTab]; the pager's swipe below calls it directly.
+                val onTabSelected: (Int) -> Unit = { selectTab(it, focusSearch = true) }
 
                 if (glassActive) Column(
                     modifier = Modifier
@@ -4761,7 +4834,9 @@ private fun BitChordApp(
                                 confirmingProfile = false
                                 if (accepted) {
                                     webSession = null
-                                    if (mode == WebSessionMode.SIGN_IN) selectedTab = 2
+                                    // Library is what an account is for — the
+                                    // page that fills in once there is one.
+                                    if (mode == WebSessionMode.SIGN_IN) selectedTab = TAB_LIBRARY
                                 } else {
                                     captureFailed = true
                                 }
@@ -5369,13 +5444,18 @@ private object PlayerSheetShape : Shape {
 
 private const val TAB_HOME = 0
 private const val TAB_EXPLORE = 1
-private const val TAB_LIBRARY = 2
-private const val TAB_SEARCH = 3
+private const val TAB_SEARCH = 2
+private const val TAB_LIBRARY = 3
+private const val TAB_ACCOUNT = 4
+
+/** How many tabs the bottom bar holds; also the pager's page count. */
+private const val TAB_COUNT = 5
 
 /**
- * What a tab's key is prefixed with in the content switcher above.
+ * What the content switcher calls the slot holding every root tab.
  *
- * The index is read back off it there rather than off `selectedTab`, so the
- * prefix has to be the one thing both the writing and the reading agree on.
+ * One key for all five because which of them is showing is the pager's own
+ * state — [pagerState] — not the switcher's. The key only has to tell that
+ * slot apart from the pushed pages and overlays that swap with it.
  */
-private const val TAB_KEY = "tab:"
+private const val TABS_KEY = "tabs"

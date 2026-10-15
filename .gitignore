@@ -1,6 +1,10 @@
 # Gradle
 .gradle/
+.gradle-home/
 .vscode/
+
+# Android SDK (kept on E: so nothing lands on C:)
+android-sdk/
 /build/
 /app/build/
 /desktopApp/bin/

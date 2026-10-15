@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
@@ -47,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,19 +69,22 @@ import com.music.bitchord.ui.player.PlayerDock
  * controls and the tabs are one component rather than two stacked bars.
  *
  * Expanded, it is a full width now playing pill sitting over the tab pill and a
- * separate circular Search tab. Scrolling down collapses it inline — the tabs
- * fold down to just the selected one, the now playing controls narrow into the
- * gap between it and Search, and the whole thing becomes a single row the width
- * of the screen. Scrolling back up expands it. The fold is driven by
- * [scrollConnection], which the page's scroll has to be dispatched into for any
- * of this to move; see MainActivity's `nestedScroll`.
+ * separate circular Account tab — the listener's own avatar, which is the
+ * rightmost shape by both platform convention and this bar's geometry. Scrolling
+ * down collapses it inline — the tabs fold down to just the selected one, the
+ * now playing controls narrow into the gap between it and Account, and the
+ * whole thing becomes a single row the width of the screen. Scrolling back up
+ * expands it. The fold is driven by [scrollConnection], which the page's scroll
+ * has to be dispatched into for any of this to move; see MainActivity's
+ * `nestedScroll`.
  *
  * Every surface here samples the app backdrop through [Modifier.liquidGlass], so
  * this is only ever used where that is supported and switched on — off either,
  * MainActivity draws [MiniPlayer] and [FloatingBottomBar] instead.
  *
  * [song] null means nothing is playing, and the accessory is simply absent: the
- * bar is then the tab pill and Search alone, and the collapse still works.
+ * bar is then the tab pill and the Account circle alone, and the collapse still
+ * works.
  */
 @Composable
 fun GlassNavBar(
@@ -119,9 +124,11 @@ fun GlassNavBar(
     // handler out of the key.
     val currentOnTabSelected by rememberUpdatedState(onTabSelected)
 
-    // Search is the odd one out in the iOS 26 layout: a circle of its own beside
-    // the pill rather than a quarter of it. It is the last tab in BitChord's
-    // order, which is where the shape wants it anyway.
+    // The Account tab is the odd one out in the iOS 26 layout: a circle of its
+    // own beside the pill rather than a fifth of it. It is the last tab in
+    // BitChord's order, which is where the shape wants it anyway, and it shows
+    // the listener's avatar photo where signed in — the face is a better mark
+    // for one's own account than any glyph.
     val standaloneIndex = tabs.lastIndex
 
     // A factory, not a value — see the note in FloatingTabBar's header. Each of
@@ -221,12 +228,34 @@ fun GlassNavBar(
                 standaloneTab(
                     key = index,
                     icon = {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = tab.label,
-                            tint = tint,
-                            modifier = Modifier.size(25.dp),
-                        )
+                        if (tab.avatarUrl != null) {
+                            // The listener's photo takes the glyph's place on
+                            // the Account circle. It carries no tint, so
+                            // selection reads as full brightness against the
+                            // unselected dim — the same 0.65 the pill glyphs
+                            // fade to — and the hairline ring is what keeps a
+                            // photo with light edges from dissolving into the
+                            // glass, same as thumbnails everywhere else.
+                            AsyncImage(
+                                model = tab.avatarUrl,
+                                contentDescription = tab.label,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(25.dp)
+                                    .clip(CircleShape)
+                                    .thumbnailBorder(CircleShape)
+                                    .graphicsLayer {
+                                        alpha = if (isSelected) 1f else 0.65f
+                                    },
+                            )
+                        } else {
+                            Icon(
+                                imageVector = tab.icon,
+                                contentDescription = tab.label,
+                                tint = tint,
+                                modifier = Modifier.size(25.dp),
+                            )
+                        }
                     },
                     onClick = onClick,
                 )
@@ -380,7 +409,7 @@ private fun GlassNowPlaying(
                     style = MaterialTheme.typography.titleMedium,
                     color = contentColor,
                     // The inline row shares its width with the tab pill and the
-                    // Search circle, so most titles will not fit at this size.
+                    // Account circle, so most titles will not fit at this size.
                     // Cut with an ellipsis rather than wrapped or scaled.
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -427,7 +456,7 @@ private fun GlassNowPlaying(
                 }
             }
             // Dropped inline: the collapsed row is sharing its width with the
-            // tab pill and the Search circle, and the title is what has to
+            // tab pill and the Account circle, and the title is what has to
             // survive that, not a second transport button.
             if (!isInline) {
                 Spacer(Modifier.width(8.dp))
